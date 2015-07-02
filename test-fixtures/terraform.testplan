@@ -1,0 +1,43 @@
+Refreshing Terraform state prior to plan...
+
+
+The Terraform execution plan has been generated and is shown below.
+Resources are shown in alphabetical order for quick scanning. Green resources
+will be created (or destroyed and then created if an existing resource
+exists), yellow resources are being changed in-place, and red resources
+will be destroyed.
+
+Note: You didn't specify an "-out" parameter to save this plan, so when
+"apply" is called, Terraform can't guarantee this is what will execute.
+
+[32m+ aws_instance.bastion
+[0m    ami:                                               "" => "ami-37501207"
+    associate_public_ip_address:                       "" => "1"
+    availability_zone:                                 "" => "<computed>"
+    ebs_block_device.#:                                "" => "1"
+    ebs_block_device.1420233019.delete_on_termination: "" => "1"
+    ebs_block_device.1420233019.device_name:           "" => "xvdc"
+    ebs_block_device.1420233019.encrypted:             "" => "<computed>"
+    ebs_block_device.1420233019.iops:                  "" => "<computed>"
+    ebs_block_device.1420233019.snapshot_id:           "" => "<computed>"
+    ebs_block_device.1420233019.volume_size:           "" => "40"
+    ebs_block_device.1420233019.volume_type:           "" => "<computed>"
+    ephemeral_block_device.#:                          "" => "<computed>"
+    instance_type:                                     "" => "m3.medium"
+    key_name:                                          "" => "bosh"
+    private_dns:                                       "" => "<computed>"
+    private_ip:                                        "" => "<computed>"
+    public_dns:                                        "" => "<computed>"
+    public_ip:                                         "" => "<computed>"
+    root_block_device.#:                               "" => "<computed>"
+    security_groups.#:                                 "" => "<computed>"
+    subnet_id:                                         "" => "${module.vpc.bastion_subnet}"
+    tags.#:                                            "" => "1"
+    tags.Name:                                         "" => "bastion"
+    tenancy:                                           "" => "<computed>"
+[0m
+[0m[32m+ module.vpc
+[0m    12 resource(s)[0m
+[0m[32m+ module.cf
+[0m    11 resource(s)[0m
+[0m

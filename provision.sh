@@ -271,45 +271,6 @@ if [[ "$uploadedServicesContribVersion" != "6" ]]; then
    bosh upload release https://cf-contrib.s3.amazonaws.com/boshrelease-cf-services-contrib-6.tgz
 fi
 
-rm -rf cloud-foundry-manifests
-git clone https://github.com/18F/cloud-foundry-manifests.git
-cd cloud-foundry-manifests
-cd dev-services
-
-DIRECTOR_UUID=`bosh status | grep UUID | awk '{print $2}'`
-echo "director_uuid: $DIRECTOR_UUID" > secrets.yml
-echo "" >> secrets.yml
-echo "meta:" >> secrets.yml
-echo "  postgres:" >> secrets.yml
-echo "    service_token: c1oudc0w" >> secrets.yml
-echo "    root_password: admin" >> secrets.yml
-echo "  security_groups: [ \"$CF_SG\" ]" >> secrets.yml
-echo "  uaa_endpoint: https://uaa.run.$CF_IP.xip.io" >> secrets.yml
-echo "  services_password: c1oudc0w" >> secrets.yml
-echo "  subnet_id: $CF_SUBNET1" >> secrets.yml
-echo "" >> secrets.yml
-echo "properties:" >> secrets.yml
-echo "  nats:" >> secrets.yml
-echo "    address: 10.10.0.207" >> secrets.yml
-echo "    port: 4222" >> secrets.yml
-echo "    user: nats" >> secrets.yml
-echo "    password: c1oudc0w" >> secrets.yml
-echo "    authorization_timeout: 5" >> secrets.yml
-echo "  cc:" >> secrets.yml
-echo "    srv_api_uri: https://api.run.$CF_IP.xip.io" >> secrets.yml
-
-sed -i 's/m1.small/m3.medium/g' main.yml
-sed -i 's/m1.medium/m3.medium/g' main.yml
-sed -i 's/bosh-aws-xen/collector_bosh-aws-xen/g' main.yml
-
-./generate.sh
-bosh deployment manifest.yml
-bosh -n deploy
-
-cd ../../
-
-exit
-
 # Upload the bosh release, set the deployment, and execute
 deployedVersion=$(bosh releases | grep " ${cfReleaseVersion}" | awk '{print $4}')
 deployedVersion="${deployedVersion//[^[:alnum:]]/}"
@@ -397,6 +358,149 @@ test -d ~/.sync || ~/.local/bin/virtualenv-3.4 ~/.sync
     pip install -r $HOME/workspace/deployments/terraform-aws-cf-install/scripts/requirements.txt
     $HOME/workspace/deployments/terraform-aws-cf-install/scripts/af_bosh_sync.py
 )
+
+DIRECTOR_UUID=`bosh status | grep UUID | awk '{print $2}'`
+MANIFEST_FILE="postgresql_srv.yml"
+CF_DEPLOY_FILE="$HOME/workspace/deployments/cf-boshworkspace/.deployments/cf-aws-$CF_SIZE.yml"
+
+TMP_YML="tmp.yml"
+NATS_CFG="nat_cfg"
+echo "properties:" > $TMP_YML
+echo "  nats: (( merge ))" >> $TMP_YML
+
+spiff merge $TMP_YML $CF_DEPLOY_FILE > $NATS_CFG
+NAT_ADDRESS=`cat $NATS_CFG | grep address | awk '{print $2}'`
+NAT_PORT=`cat $NATS_CFG | grep -w port | awk '{print $2}'`
+NAT_USER=`cat $NATS_CFG | grep user | awk '{print $2}'`
+NAT_PASSWD=`cat $NATS_CFG | grep password | awk '{print $2}'`
+TOKEN=`cat $CF_DEPLOY_FILE | grep -w secret: | awk 'NR==1{print $2}'`
+
+rm $NATS_CFG
+rm $TMP_YML
+
+echo "---" > $MANIFEST_FILE
+echo "name: cf-services-contrib" >> $MANIFEST_FILE
+echo "director_uuid: $DIRECTOR_UUID" >> $MANIFEST_FILE
+echo "" >> $MANIFEST_FILE
+echo "releases:" >> $MANIFEST_FILE
+echo "  - name: cf-services-contrib" >> $MANIFEST_FILE
+echo "    version: 6" >> $MANIFEST_FILE
+echo "" >> $MANIFEST_FILE
+echo "compilation:" >> $MANIFEST_FILE
+echo "  workers: 3" >> $MANIFEST_FILE
+echo "  network: default" >> $MANIFEST_FILE
+echo "  reuse_compilation_vms: true" >> $MANIFEST_FILE
+echo "  cloud_properties:" >> $MANIFEST_FILE
+echo "    instance_type: m3.medium" >> $MANIFEST_FILE
+echo "" >> $MANIFEST_FILE
+echo "update:" >> $MANIFEST_FILE
+echo "  canaries: 1" >> $MANIFEST_FILE
+echo "  canary_watch_time: 30000-60000" >> $MANIFEST_FILE
+echo "  update_watch_time: 30000-60000" >> $MANIFEST_FILE
+echo "  max_in_flight: 4" >> $MANIFEST_FILE
+echo "" >> $MANIFEST_FILE
+echo "networks:" >> $MANIFEST_FILE
+echo "  - name: floating" >> $MANIFEST_FILE
+echo "    type: vip" >> $MANIFEST_FILE
+echo "    cloud_properties: {}" >> $MANIFEST_FILE
+echo "  - name: default" >> $MANIFEST_FILE
+echo "    type: dynamic" >> $MANIFEST_FILE
+echo "    cloud_properties:" >> $MANIFEST_FILE
+echo "      security_groups:" >> $MANIFEST_FILE
+echo "        - $CF_SG" >> $MANIFEST_FILE
+echo "      subnet: $CF_SUBNET1" >> $MANIFEST_FILE
+echo "" >> $MANIFEST_FILE
+echo "resource_pools:" >> $MANIFEST_FILE
+echo "  - name: common" >> $MANIFEST_FILE
+echo "    network: default" >> $MANIFEST_FILE
+echo "    size: 2" >> $MANIFEST_FILE
+echo "    stemcell:" >> $MANIFEST_FILE
+echo "      name: collector_bosh-aws-xen-ubuntu-trusty-go_agent" >> $MANIFEST_FILE
+echo "      version: latest" >> $MANIFEST_FILE
+echo "    cloud_properties:" >> $MANIFEST_FILE
+echo "      instance_type: m3.medium" >> $MANIFEST_FILE
+echo "" >> $MANIFEST_FILE
+echo "jobs:" >> $MANIFEST_FILE
+echo "  - name: gateways" >> $MANIFEST_FILE
+echo "    release: cf-services-contrib" >> $MANIFEST_FILE
+echo "    template:" >> $MANIFEST_FILE
+echo "    - postgresql_gateway_ng" >> $MANIFEST_FILE
+echo "    instances: 1" >> $MANIFEST_FILE
+echo "    resource_pool: common" >> $MANIFEST_FILE
+echo "    persistent_disk: 10000" >> $MANIFEST_FILE
+echo "    networks:" >> $MANIFEST_FILE
+echo "      - name: default" >> $MANIFEST_FILE
+echo "        default: [dns, gateway]" >> $MANIFEST_FILE
+echo "    properties:" >> $MANIFEST_FILE
+echo "      uaa_client_id: \"cf\"" >> $MANIFEST_FILE
+echo "      uaa_endpoint: https://uaa.run.$CF_IP.xip.io" >> $MANIFEST_FILE
+echo "      uaa_client_auth_credentials:" >> $MANIFEST_FILE
+echo "        username: admin" >> $MANIFEST_FILE
+echo "        password: $CF_ADMIN_PASS" >> $MANIFEST_FILE
+echo "" >> $MANIFEST_FILE
+echo "  - name: postgresql_service_node" >> $MANIFEST_FILE
+echo "    release: cf-services-contrib" >> $MANIFEST_FILE
+echo "    template: postgresql_node_ng" >> $MANIFEST_FILE
+echo "    instances: 1" >> $MANIFEST_FILE
+echo "    resource_pool: common" >> $MANIFEST_FILE
+echo "    persistent_disk: 10000" >> $MANIFEST_FILE
+echo "    properties:" >> $MANIFEST_FILE
+echo "      postgresql_node:" >> $MANIFEST_FILE
+echo "        plan: default" >> $MANIFEST_FILE
+echo "    networks:" >> $MANIFEST_FILE
+echo "      - name: default" >> $MANIFEST_FILE
+echo "        default: [dns, gateway]" >> $MANIFEST_FILE
+echo "" >> $MANIFEST_FILE
+echo "" >> $MANIFEST_FILE
+echo "properties:" >> $MANIFEST_FILE
+echo "  networks:" >> $MANIFEST_FILE
+echo "    apps: default" >> $MANIFEST_FILE
+echo "    management: default" >> $MANIFEST_FILE
+echo "" >> $MANIFEST_FILE
+echo "  cc:" >> $MANIFEST_FILE
+echo "    srv_api_uri: https://api.run.$CF_IP.xip.io" >> $MANIFEST_FILE
+echo "" >> $MANIFEST_FILE
+echo "  nats:" >> $MANIFEST_FILE
+echo "    address: $NAT_ADDRESS" >> $MANIFEST_FILE
+echo "    port: $NAT_PORT" >> $MANIFEST_FILE
+echo "    user: $NAT_USER" >> $MANIFEST_FILE
+echo "    password: $NAT_PASSWD" >> $MANIFEST_FILE
+echo "    authorization_timeout: 5" >> $MANIFEST_FILE
+echo "" >> $MANIFEST_FILE
+echo "  service_plans:" >> $MANIFEST_FILE
+echo "    postgresql:" >> $MANIFEST_FILE
+echo "      default:" >> $MANIFEST_FILE
+echo "        description: \"Developer, 250MB storage, 10 connections\"" >> $MANIFEST_FILE
+echo "        free: true" >> $MANIFEST_FILE
+echo "        job_management:" >> $MANIFEST_FILE
+echo "          high_water: 230" >> $MANIFEST_FILE
+echo "          low_water: 20" >> $MANIFEST_FILE
+echo "        configuration:" >> $MANIFEST_FILE
+echo "          capacity: 125" >> $MANIFEST_FILE
+echo "          max_clients: 10" >> $MANIFEST_FILE
+echo "          quota_files: 4" >> $MANIFEST_FILE
+echo "          quota_data_size: 240" >> $MANIFEST_FILE
+echo "          enable_journaling: true" >> $MANIFEST_FILE
+echo "          backup:" >> $MANIFEST_FILE
+echo "            enable: false" >> $MANIFEST_FILE
+echo "          lifecycle:" >> $MANIFEST_FILE
+echo "            enable: false" >> $MANIFEST_FILE
+echo "            serialization: enable" >> $MANIFEST_FILE
+echo "            snapshot:" >> $MANIFEST_FILE
+echo "              quota: 1" >> $MANIFEST_FILE
+echo "" >> $MANIFEST_FILE
+echo "" >> $MANIFEST_FILE
+echo "  postgresql_gateway:" >> $MANIFEST_FILE
+echo "    token: $TOKEN" >> $MANIFEST_FILE
+echo "    default_plan: default" >> $MANIFEST_FILE
+echo "    supported_versions: [\"9.3\"]" >> $MANIFEST_FILE
+echo "    version_aliases:" >> $MANIFEST_FILE
+echo "      current: \"9.3\"" >> $MANIFEST_FILE
+echo "    cc_api_version: v2" >> $MANIFEST_FILE
+echo "  postgresql_node:" >> $MANIFEST_FILE
+
+bosh deployment $MANIFEST_FILE
+bosh -n deploy
 
 echo "Provision script completed..."
 exit 0
